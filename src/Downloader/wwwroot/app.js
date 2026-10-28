@@ -48,7 +48,7 @@ form.addEventListener("submit", async (event) => {
       showMedia(probe);
     }
   } catch (error) {
-    showMessage(error.message);
+    showMessage(explain(error));
   } finally {
     probeButton.disabled = false;
     probeButton.textContent = "Einlesen";
@@ -83,7 +83,7 @@ for (const button of media.querySelectorAll("button[data-mode]")) {
       showMessage("");
       await refresh();
     } catch (error) {
-      showMessage(error.message);
+      showMessage(explain(error));
     } finally {
       button.disabled = false;
     }
@@ -297,6 +297,11 @@ function showMessage(text) {
   message.hidden = !text;
 }
 
+// fetch rejects with a TypeError only when the request never got an answer.
+function explain(error) {
+  return error instanceof TypeError ? "Keine Verbindung zum Server." : error.message;
+}
+
 async function problem(response) {
   try {
     const body = await response.json();
@@ -306,5 +311,24 @@ async function problem(response) {
   }
 }
 
+// A link shared from another app (share_target in the manifest) arrives as
+// url or, from most apps, somewhere inside text. Read it right away.
+function takeSharedLink() {
+  const query = new URLSearchParams(location.search);
+  const link = [query.get("url"), query.get("text")].join(" ").match(/https?:\/\/\S+/)?.[0];
+  if (link) {
+    history.replaceState(null, "", location.pathname);
+    input.value = link;
+    form.requestSubmit();
+  }
+}
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js").catch(() => {
+    // Only installing needs it; the page works without.
+  });
+}
+
+takeSharedLink();
 refresh();
 setInterval(render, 1000);

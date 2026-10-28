@@ -10,6 +10,7 @@
   --danger: #c2341d;
   --track: #e8ebf0;
   --radius: 10px;
+  --shadow: 0 8px 28px rgb(16 24 40 / 0.16);
   --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%23687080' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m1 1.5 5 5 5-5'/%3E%3C/svg%3E");
 }
 
@@ -24,6 +25,7 @@
     --accent-text: #0b0d10;
     --danger: #ff7a66;
     --track: #2b2f38;
+    --shadow: 0 8px 28px rgb(0 0 0 / 0.55);
     --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%2399a0ad' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m1 1.5 5 5 5-5'/%3E%3C/svg%3E");
   }
 }
@@ -288,6 +290,58 @@ button:disabled {
 @keyframes slide {
   from { transform: translateX(-100%); }
   to { transform: translateX(340%); }
+}
+
+/* Floats above the page until answered; see install.js. */
+.install {
+  position: fixed;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  left: 16px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px 14px;
+  max-width: 608px;
+  margin: 0 auto;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.install img {
+  border-radius: 10px;
+}
+
+.install-title {
+  margin: 0;
+  font-weight: 600;
+}
+
+.install-hint {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.install-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.install-actions button {
+  flex: 1 1 auto;
+  padding: 10px 16px;
+}
+
+button.quiet {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--text);
 }
 
 [hidden] {

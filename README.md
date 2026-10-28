@@ -79,6 +79,31 @@ hier 480p, und die Grenze ist ihre echte Auflösung.
 Playlists werden nicht aufgelöst: `--no-playlist` und `--playlist-items 1`
 sorgen dafür, dass höchstens ein Video geladen wird.
 
+## Als App
+
+Die Seite ist eine installierbare PWA (`manifest.webmanifest`, `sw.js`, Icons
+unter `icons/`).
+
+- **Nachfrage:** Beim Öffnen fragt sie, ob sie als App installiert werden
+  soll. **Installieren** öffnet den Installationsdialog des Browsers.
+  **Nein** fragt beim nächsten Öffnen wieder, gemerkt in `sessionStorage`.
+  **Nie wieder fragen** gilt dauerhaft für diesen Browser, gemerkt in
+  `localStorage`. Läuft die Seite schon als App, fragt sie nicht.
+- **Browser:** Den Dialog gibt es nur in Chromium-Browsern, also Chrome und
+  Edge auf Android und am Desktop, und nur, wenn der Browser die Seite für
+  installierbar hält. Den Browser-eigenen Hinweis unterdrückt die Seite
+  immer, damit „Nie wieder fragen“ auch für ihn gilt. Auf iPhone und iPad
+  erklärt „Installieren“ stattdessen den Weg über „Teilen“ und „Zum
+  Home-Bildschirm“, denn Safari bietet keinen Dialog an. Firefox am Desktop
+  kann keine PWAs installieren und fragt nicht.
+- **Teilen-Ziel:** Installiert auf Android erscheint der Downloader im
+  Teilen-Menü anderer Apps. Ein geteilter Link öffnet `/?text=…` oder
+  `/?url=…`, die Seite übernimmt die erste URL daraus und liest sie sofort
+  ein.
+- **Service Worker:** Er arbeitet „Network first“ und hält nur die Seite
+  selbst vor, damit sie ohne Verbindung wenigstens startet. `/api/` reicht er
+  unberührt durch, also auch die Downloads.
+
 ## Konfiguration
 
 Alle Werte über Umgebungsvariablen mit dem Präfix `Downloader__`.

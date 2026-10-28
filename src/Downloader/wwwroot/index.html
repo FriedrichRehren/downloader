@@ -4,9 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Downloader</title>
+  <meta name="description" content="Videos und Audio per Link herunterladen, in bester Qualität oder im Format nach Wahl.">
+  <meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-title" content="Downloader">
+  <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232563eb' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3v12m0 0-5-5m5 5 5-5M5 21h14'/%3E%3C/svg%3E">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="stylesheet" href="app.css">
   <script src="app.js" defer></script>
+  <script src="install.js" defer></script>
 </head>
 <body>
   <main>
@@ -50,6 +57,19 @@
       Noch nichts heruntergeladen. Downloads sind nur in diesem Browser sichtbar und werden eine Stunde nach Fertigstellung gelöscht.
     </p>
   </main>
+
+  <aside id="install" class="install" aria-labelledby="install-title" hidden>
+    <img src="icons/icon-192.png" alt="" width="44" height="44">
+    <div class="install-text">
+      <p id="install-title" class="install-title">Downloader als App installieren?</p>
+      <p id="install-hint" class="install-hint">Dann startet er vom Startbildschirm, ohne Browserleiste.</p>
+    </div>
+    <div class="install-actions">
+      <button type="button" id="install-yes">Installieren</button>
+      <button type="button" id="install-no" class="quiet">Nein</button>
+      <button type="button" id="install-never" class="quiet">Nie wieder fragen</button>
+    </div>
+  </aside>
 
   <template id="job">
     <li class="job">
