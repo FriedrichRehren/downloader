@@ -17,7 +17,13 @@ builder.Services.AddHostedService(services => services.GetRequiredService<JobMan
 var app = builder.Build();
 
 app.UseDefaultFiles();
-app.UseStaticFiles();
+// Without a header of our own, Cloudflare keeps scripts and styles for hours,
+// and a new page ends up running an old app.js against the new API. no-cache
+// makes everyone revalidate; the ETag keeps that to a 304.
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = context => context.Context.Response.Headers.CacheControl = "no-cache",
+});
 
 const string InvalidUrl = "Bitte eine http- oder https-URL angeben.";
 
