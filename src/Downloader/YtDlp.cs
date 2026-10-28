@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 
 namespace Downloader;
 
@@ -13,12 +14,34 @@ public static class YtDlp
 {
     private const string Marker = "downloader:";
 
-    public static bool Supports(JobMode mode, JobFormat format) =>
-        (mode, format) is (JobMode.Video or JobMode.Audio, JobFormat.Original)
-            or (JobMode.Video, JobFormat.Mp4)
-            or (JobMode.Audio, JobFormat.Mp3);
+    // yt-dlp's field names are snake_case.
+    private static readonly JsonSerializerOptions ProbeJson = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+    };
 
-    public static IReadOnlyList<string> BuildArguments(string url, JobMode mode, JobFormat format)
+    public static bool Supports(JobMode mode, JobFormat format) => Selection(mode, format, resolution: null) is not null;
+
+    /// <summary>
+    /// Reads what a URL offers without downloading anything. --print implies
+    /// --simulate. Only the fields the page needs: the full info dict runs to
+    /// hundreds of kilobytes.
+    /// </summary>
+    public static IReadOnlyList<string> BuildProbeArguments(string url) =>
+    [
+        "--no-playlist",
+        "--playlist-items", "1",
+        "--no-cache-dir",
+        // The Video default, so the top-level fields describe exactly what
+        // "best quality" downloads, as yt-dlp itself chose it.
+        "--format", "bv*+ba/b",
+        "--print", $"{Marker}info %(.{{title,uploader,duration,thumbnail,vcodec,acodec,width,height,fps,abr,dynamic_range,filesize,filesize_approx}})j",
+        "--print", $"{Marker}formats %(formats.:.{{vcodec,acodec,width,height,fps,dynamic_range}})j",
+        "--",
+        url,
+    ];
+
+    public static IReadOnlyList<string> BuildArguments(string url, JobMode mode, JobFormat format, int? resolution = null)
     {
         var arguments = new List<string>
         {
@@ -44,40 +67,57 @@ public static class YtDlp
             "--print", $"after_move:{Marker}file %(filepath)s",
         };
 
-        arguments.AddRange((mode, format) switch
-        {
-            // Best video and best audio, merged into the first container that
-            // takes both codecs as they are, so nothing is re-encoded. For
-            // YouTube's AV1 and Opus that is webm, which browsers play directly.
-            (JobMode.Video, JobFormat.Original) => ["--format", "bv*+ba/b", "--merge-output-format", "mp4/webm/mkv"],
-            // yt-dlp's -t mp4, spelled out so a new release cannot change it.
-            // H.264 and AAC sort first, still without re-encoding; on YouTube
-            // that means 1080p at most.
-            (JobMode.Video, JobFormat.Mp4) =>
-            [
-                "--format", "bv*+ba/b",
-                "--format-sort", "vcodec:h264,lang,quality,res,fps,hdr:12,acodec:aac",
-                "--merge-output-format", "mp4",
-                "--remux-video", "mp4",
-            ],
-            // The original audio stream, again without re-encoding.
-            (JobMode.Audio, JobFormat.Original) => ["--format", "ba/b", "--extract-audio", "--audio-format", "best"],
-            // yt-dlp's -t mp3, but at the best VBR quality instead of its
-            // default of 5. An MP3 source is kept as it is.
-            (JobMode.Audio, JobFormat.Mp3) =>
-            [
-                "--format", "ba[acodec^=mp3]/ba/b",
-                "--extract-audio",
-                "--audio-format", "mp3",
-                "--audio-quality", "0",
-            ],
-            _ => throw new ArgumentOutOfRangeException(nameof(format), format, $"{format} is not available for {mode}."),
-        });
+        arguments.AddRange(Selection(mode, format, resolution)
+            ?? throw new ArgumentOutOfRangeException(nameof(format), format, $"{format} is not available for {mode}."));
 
         // Everything after -- is a URL, even if it starts with a dash.
         arguments.Add("--");
         arguments.Add(url);
         return arguments;
+    }
+
+    /// <summary>
+    /// Format options per mode and format, or null if the mode does not offer
+    /// the format. MP4, MKV and MP3 follow yt-dlp's -t presets, spelled out so
+    /// a new release cannot change them.
+    /// </summary>
+    private static string[]? Selection(JobMode mode, JobFormat format, int? resolution)
+    {
+        // yt-dlp ranks only its two fixed fields above a sort field given here,
+        // so the best video within the limit wins over everything else. res is
+        // the shorter side, like the resolution the probe reports.
+        string[] limit = resolution is { } highest ? ["--format-sort", $"res:{highest}"] : [];
+
+        return (mode, format) switch
+        {
+            // Best video and best audio, merged into the first container that
+            // takes both codecs as they are, so nothing is re-encoded. For
+            // YouTube's AV1 and Opus that is webm, which browsers play directly.
+            (JobMode.Video, JobFormat.Original) => ["--format", "bv*+ba/b", .. limit, "--merge-output-format", "mp4/webm/mkv"],
+            // H.264 and AAC sort first, still without re-encoding; on YouTube
+            // that means 1080p at most. A resolution limit has to go ahead of
+            // quality, which would otherwise prefer the larger stream.
+            (JobMode.Video, JobFormat.Mp4) =>
+            [
+                "--format", "bv*+ba/b",
+                "--format-sort", resolution is { } h264
+                    ? $"vcodec:h264,res:{h264},lang,quality,fps,hdr:12,acodec:aac"
+                    : "vcodec:h264,lang,quality,res,fps,hdr:12,acodec:aac",
+                "--merge-output-format", "mp4",
+                "--remux-video", "mp4",
+            ],
+            (JobMode.Video, JobFormat.Mkv) => ["--format", "bv*+ba/b", .. limit, "--merge-output-format", "mkv", "--remux-video", "mkv"],
+            // The original audio stream, again without re-encoding.
+            (JobMode.Audio, JobFormat.Original) => ["--format", "ba/b", "--extract-audio", "--audio-format", "best"],
+            // A source already in the target codec is kept as it is, so prefer
+            // one. --audio-quality 0 is the best VBR setting for MP3 (V0) and
+            // AAC alike.
+            (JobMode.Audio, JobFormat.Mp3) => ["--format", "ba[acodec^=mp3]/ba/b", "--extract-audio", "--audio-format", "mp3", "--audio-quality", "0"],
+            (JobMode.Audio, JobFormat.M4a) => ["--format", "ba[acodec^=mp4a]/ba/b", "--extract-audio", "--audio-format", "m4a", "--audio-quality", "0"],
+            (JobMode.Audio, JobFormat.Flac) => ["--format", "ba/b", "--extract-audio", "--audio-format", "flac"],
+            (JobMode.Audio, JobFormat.Wav) => ["--format", "ba/b", "--extract-audio", "--audio-format", "wav"],
+            _ => null,
+        };
     }
 
     public static YtDlpReport Parse(string output)
@@ -108,6 +148,44 @@ public static class YtDlp
         }
 
         return new YtDlpReport(title, file, downloaded, total, error);
+    }
+
+    /// <exception cref="ProbeException">yt-dlp failed or printed nothing usable.</exception>
+    public static Probe ParseProbe(string output)
+    {
+        string? info = null, formats = null, error = null;
+
+        foreach (var line in output.Split('\n', '\r'))
+        {
+            if (line.StartsWith(Marker + "info ", StringComparison.Ordinal))
+            {
+                info = line[(Marker.Length + "info ".Length)..];
+            }
+            else if (line.StartsWith(Marker + "formats ", StringComparison.Ordinal))
+            {
+                formats = line[(Marker.Length + "formats ".Length)..];
+            }
+            else if (line.StartsWith("ERROR: ", StringComparison.Ordinal))
+            {
+                error = line["ERROR: ".Length..].Trim();
+            }
+        }
+
+        if (info is null)
+        {
+            throw new ProbeException(error ?? "yt-dlp hat keine Formate geliefert.");
+        }
+
+        try
+        {
+            return Probe.From(
+                JsonSerializer.Deserialize<ProbeInfo>(info, ProbeJson)!,
+                formats is null or "NA" ? [] : JsonSerializer.Deserialize<List<ProbeFormat>>(formats, ProbeJson)!);
+        }
+        catch (JsonException)
+        {
+            throw new ProbeException("Die Antwort von yt-dlp ist nicht lesbar.");
+        }
     }
 
     // Missing fields come out as "NA"; estimates can be fractional.

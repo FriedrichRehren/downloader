@@ -19,18 +19,40 @@ var app = builder.Build();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
+const string InvalidUrl = "Bitte eine http- oder https-URL angeben.";
+
+app.MapPost("/api/probe", async (ProbeRequest request, JobManager manager, CancellationToken cancellationToken) =>
+{
+    if (ParseUrl(request.Url) is not { } url)
+    {
+        return Results.Problem(InvalidUrl, statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    try
+    {
+        return await manager.ProbeAsync(url.AbsoluteUri, cancellationToken) is { } probe
+            ? Results.Ok(probe)
+            : Results.Problem("Gerade werden zu viele Links eingelesen. Bitte gleich noch einmal.", statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+    catch (ProbeException exception)
+    {
+        return Results.Problem(exception.Message, statusCode: StatusCodes.Status422UnprocessableEntity);
+    }
+    catch (DockerException exception)
+    {
+        return Results.Problem(exception.Message, statusCode: StatusCodes.Status502BadGateway);
+    }
+});
+
 var jobs = app.MapGroup("/api/jobs");
 
 jobs.MapGet("", (HttpContext context, JobManager manager) => manager.List(Client.Identify(context)));
 
 jobs.MapPost("", (CreateJobRequest request, HttpContext context, JobManager manager) =>
 {
-    var input = request.Url?.Trim();
-    if (input is not { Length: <= 4096 }
-        || !Uri.TryCreate(input, UriKind.Absolute, out var url)
-        || url.Scheme is not ("http" or "https"))
+    if (ParseUrl(request.Url) is not { } url)
     {
-        return Results.Problem("Bitte eine http- oder https-URL angeben.", statusCode: StatusCodes.Status400BadRequest);
+        return Results.Problem(InvalidUrl, statusCode: StatusCodes.Status400BadRequest);
     }
 
     if (!Enum.IsDefined(request.Mode))
@@ -43,7 +65,12 @@ jobs.MapPost("", (CreateJobRequest request, HttpContext context, JobManager mana
         return Results.Problem("Dieses Format gibt es für diesen Modus nicht.", statusCode: StatusCodes.Status400BadRequest);
     }
 
-    return manager.Enqueue(url.AbsoluteUri, request.Mode, request.Format, Client.Identify(context)) is { } job
+    if (request.Resolution is not null && (request.Mode != JobMode.Video || request.Resolution is not (> 0 and <= 10000)))
+    {
+        return Results.Problem("Ungültige Auflösung.", statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    return manager.Enqueue(url.AbsoluteUri, request.Mode, request.Format, request.Resolution, Client.Identify(context)) is { } job
         ? Results.Created($"/api/jobs/{job.Id}", job)
         : Results.Problem("Es laufen schon zu viele Downloads.", statusCode: StatusCodes.Status429TooManyRequests);
 });
@@ -58,4 +85,14 @@ jobs.MapGet("{id}/file", (string id, HttpContext context, JobManager manager) =>
 
 app.Run();
 
-internal sealed record CreateJobRequest(string? Url, JobMode Mode, JobFormat Format = JobFormat.Original);
+// Only absolute http and https URLs ever reach yt-dlp.
+static Uri? ParseUrl(string? input) =>
+    input?.Trim() is { Length: <= 4096 } trimmed
+    && Uri.TryCreate(trimmed, UriKind.Absolute, out var url)
+    && url.Scheme is "http" or "https"
+        ? url
+        : null;
+
+internal sealed record ProbeRequest(string? Url);
+
+internal sealed record CreateJobRequest(string? Url, JobMode Mode, JobFormat Format = JobFormat.Original, int? Resolution = null);

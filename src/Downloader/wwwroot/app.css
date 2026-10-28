@@ -10,6 +10,7 @@
   --danger: #c2341d;
   --track: #e8ebf0;
   --radius: 10px;
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%23687080' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m1 1.5 5 5 5-5'/%3E%3C/svg%3E");
 }
 
 @media (prefers-color-scheme: dark) {
@@ -23,6 +24,7 @@
     --accent-text: #0b0d10;
     --danger: #ff7a66;
     --track: #2b2f38;
+    --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%2399a0ad' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m1 1.5 5 5 5-5'/%3E%3C/svg%3E");
   }
 }
 
@@ -56,31 +58,107 @@ form {
   flex-wrap: wrap;
 }
 
-input {
-  flex: 1 1 280px;
+input,
+select {
   min-width: 0;
-  padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--surface);
+  background-color: var(--surface);
   color: inherit;
   font: inherit;
 }
 
-input:focus {
+/* Narrow enough to keep the button beside it on a phone. */
+input {
+  flex: 1 1 180px;
+  padding: 12px 14px;
+}
+
+input:focus,
+select:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
 }
 
-.modes {
+/* appearance: none takes the native arrow with it, so it comes back as an image. */
+select {
+  padding: 10px 36px 10px 12px;
+  background-image: var(--chevron);
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 12px;
+  text-overflow: ellipsis;
+  appearance: none;
+  cursor: pointer;
+}
+
+.media {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin: 16px 0 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.media select {
+  background-color: var(--bg);
+}
+
+.source {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.source img {
+  flex: none;
+  width: 112px;
+  aspect-ratio: 16 / 9;
+  border-radius: 6px;
+  background: var(--track);
+  object-fit: cover;
+}
+
+.about {
+  min-width: 0;
+}
+
+.media-title {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  font-weight: 600;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.meta {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.pick {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
-  flex: 1 1 100%;
+}
+
+/* A row of its own: its labels carry resolution, codec and size. */
+.pick #video-resolution {
+  grid-column: 1 / -1;
+}
+
+.pick button {
+  min-width: 132px;
 }
 
 .formats {
-  margin: 8px 0 0;
+  margin: 0;
   color: var(--muted);
   font-size: 0.85rem;
 }
@@ -100,9 +178,8 @@ button,
   cursor: pointer;
 }
 
-button.secondary {
-  background: transparent;
-  color: var(--accent);
+form button {
+  flex: none;
 }
 
 button:disabled {
@@ -153,8 +230,7 @@ button:disabled {
   color: var(--muted);
   font-size: 0.75rem;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 
 .title {
@@ -223,8 +299,8 @@ button:disabled {
     padding-top: 24px;
   }
 
-  .modes {
-    grid-template-columns: repeat(2, 1fr);
+  .pick {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .job .line:last-child {

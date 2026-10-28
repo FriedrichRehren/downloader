@@ -139,9 +139,10 @@ public sealed class DockerClient(HttpClient http)
         return (await response.Content.ReadFromJsonAsync<ContainerDetails>(Json, cancellationToken))!;
     }
 
-    public async Task<string> GetLogsAsync(string id, int tail, CancellationToken cancellationToken)
+    /// <param name="tail">Lines from the end, or null for all of them.</param>
+    public async Task<string> GetLogsAsync(string id, int? tail, CancellationToken cancellationToken)
     {
-        using var response = await http.GetAsync($"containers/{id}/logs?stdout=true&stderr=true&tail={tail}", cancellationToken);
+        using var response = await http.GetAsync($"containers/{id}/logs?stdout=true&stderr=true&tail={tail?.ToString() ?? "all"}", cancellationToken);
         await EnsureSuccessAsync(response, cancellationToken);
         return Demultiplex(await response.Content.ReadAsByteArrayAsync(cancellationToken));
     }

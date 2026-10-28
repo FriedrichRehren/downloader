@@ -20,14 +20,21 @@ public sealed class JobManager(
     public const string JobLabel = "io.rehren.downloader.job";
 
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
+    // Someone is waiting for the probe, and it only takes seconds.
+    private static readonly TimeSpan ProbePollInterval = TimeSpan.FromMilliseconds(250);
+    // Reading a URL and downloading it a moment later would otherwise pull
+    // the image twice within seconds, and Docker Hub counts every pull.
+    private static readonly TimeSpan PullInterval = TimeSpan.FromMinutes(5);
 
     private readonly DownloaderOptions settings = options.Value;
     private readonly ConcurrentDictionary<string, Entry> entries = new();
     private readonly SemaphoreSlim slots = new(options.Value.MaxConcurrentJobs);
+    private readonly SemaphoreSlim probeSlots = new(options.Value.MaxConcurrentProbes);
     private readonly SemaphoreSlim pullLock = new(1, 1);
     // Images a pull replaced. Removing one fails while a job still runs in it,
     // so it stays here until an attempt after a later job goes through.
     private readonly HashSet<string> replacedImages = [];
+    private DateTimeOffset lastPull;
     private string? volume;
     private volatile bool stopping;
 
@@ -38,7 +45,7 @@ public sealed class JobManager(
             .OrderByDescending(job => job.CreatedAt)
             .ToList();
 
-    public JobView? Enqueue(string url, JobMode mode, JobFormat format, string owner)
+    public JobView? Enqueue(string url, JobMode mode, JobFormat format, int? resolution, string owner)
     {
         if (entries.Values.Count(entry => entry.Job.State is JobState.Queued or JobState.Running) >= settings.MaxActiveJobs)
         {
@@ -52,6 +59,7 @@ public sealed class JobManager(
             Url = url,
             Mode = mode,
             Format = format,
+            Resolution = resolution,
             CreatedAt = DateTimeOffset.UtcNow,
             State = JobState.Queued,
         };
@@ -86,6 +94,59 @@ public sealed class JobManager(
 
         await RemoveAsync(entry);
         return true;
+    }
+
+    /// <summary>
+    /// Reads which formats a URL offers, in a throwaway container like a job's
+    /// but without the volume. Probes run beside jobs, not in their slots:
+    /// someone is waiting for the answer.
+    /// </summary>
+    /// <returns>Null if too many probes are running already.</returns>
+    /// <exception cref="ProbeException">yt-dlp could not read the URL.</exception>
+    public async Task<Probe?> ProbeAsync(string url, CancellationToken cancellationToken)
+    {
+        if (!await probeSlots.WaitAsync(0, cancellationToken))
+        {
+            return null;
+        }
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(settings.ProbeTimeout);
+        string? containerId = null;
+
+        try
+        {
+            await UpdateImageAsync(timeout.Token);
+            containerId = await docker.CreateContainerAsync(
+                $"downloader-probe-{Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8))}",
+                ContainerSpec(YtDlp.BuildProbeArguments(url), label: "probe", mounts: []),
+                timeout.Token);
+            await docker.StartContainerAsync(containerId, timeout.Token);
+
+            ContainerState state;
+            do
+            {
+                await Task.Delay(ProbePollInterval, timeout.Token);
+                state = (await docker.InspectContainerAsync(containerId, timeout.Token)).State;
+            }
+            while (state.Running);
+
+            return YtDlp.ParseProbe(await docker.GetLogsAsync(containerId, tail: null, timeout.Token));
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            throw new ProbeException($"Nach {settings.ProbeTimeout.TotalSeconds:0} Sekunden abgebrochen.");
+        }
+        finally
+        {
+            if (containerId is not null)
+            {
+                await RemoveContainerQuietlyAsync(containerId);
+                await RemoveReplacedImagesAsync();
+            }
+
+            probeSlots.Release();
+        }
     }
 
     public override async Task StartAsync(CancellationToken cancellationToken)
@@ -233,42 +294,50 @@ public sealed class JobManager(
         var source = await ResolveVolumeAsync(cancellationToken);
         store.CreateFilesDirectory(job.Id);
 
-        return await docker.CreateContainerAsync($"downloader-job-{job.Id}", new
-        {
-            Image = settings.JobImage,
-            Cmd = YtDlp.BuildArguments(job.Url, job.Mode, job.Format),
-            User = settings.JobUser,
-            // deno and Python want a writable home for their caches.
-            Env = new[] { "HOME=/tmp" },
-            Labels = new Dictionary<string, string> { [JobLabel] = job.Id },
-            HostConfig = new
+        // The job sees its own directory and nothing else of the volume.
+        object[] mounts =
+        [
+            new
             {
-                NetworkMode = settings.JobNetwork,
-                // The job sees its own directory and nothing else of the volume.
-                Mounts = new[]
-                {
-                    new
-                    {
-                        Type = "volume",
-                        Source = source,
-                        Target = "/downloads",
-                        VolumeOptions = new { Subpath = JobStore.FilesSubpath(job.Id) },
-                    },
-                },
-                ReadonlyRootfs = true,
-                Tmpfs = new Dictionary<string, string> { ["/tmp"] = "size=512m" },
-                CapDrop = new[] { "ALL" },
-                SecurityOpt = new[] { "no-new-privileges:true" },
-                Memory = settings.JobMemoryBytes,
-                PidsLimit = 256,
-                LogConfig = new
-                {
-                    Type = "json-file",
-                    Config = new Dictionary<string, string> { ["max-size"] = "10m", ["max-file"] = "1" },
-                },
+                Type = "volume",
+                Source = source,
+                Target = "/downloads",
+                VolumeOptions = new { Subpath = JobStore.FilesSubpath(job.Id) },
             },
-        }, cancellationToken);
+        ];
+
+        return await docker.CreateContainerAsync(
+            $"downloader-job-{job.Id}",
+            ContainerSpec(YtDlp.BuildArguments(job.Url, job.Mode, job.Format, job.Resolution), job.Id, mounts),
+            cancellationToken);
     }
+
+    // Jobs and probes alike. The label lets startup remove what a crash left behind.
+    private object ContainerSpec(IReadOnlyList<string> command, string label, object[] mounts) => new
+    {
+        Image = settings.JobImage,
+        Cmd = command,
+        User = settings.JobUser,
+        // deno and Python want a writable home for their caches.
+        Env = new[] { "HOME=/tmp" },
+        Labels = new Dictionary<string, string> { [JobLabel] = label },
+        HostConfig = new
+        {
+            NetworkMode = settings.JobNetwork,
+            Mounts = mounts,
+            ReadonlyRootfs = true,
+            Tmpfs = new Dictionary<string, string> { ["/tmp"] = "size=512m" },
+            CapDrop = new[] { "ALL" },
+            SecurityOpt = new[] { "no-new-privileges:true" },
+            Memory = settings.JobMemoryBytes,
+            PidsLimit = 256,
+            LogConfig = new
+            {
+                Type = "json-file",
+                Config = new Dictionary<string, string> { ["max-size"] = "10m", ["max-file"] = "1" },
+            },
+        },
+    };
 
     private void Finish(Job job, ContainerState state, YtDlpReport report)
     {
@@ -322,14 +391,15 @@ public sealed class JobManager(
             var expiresIn = job.ExpiresAt is { } expiresAt
                 ? (long)Math.Max(0, (expiresAt - DateTimeOffset.UtcNow).TotalSeconds)
                 : (long?)null;
-            return new JobView(job.Id, job.Url, job.Mode, job.Format, job.State, job.Title, job.FileName, job.FileSize,
+            return new JobView(job.Id, job.Url, job.Mode, job.Format, job.Resolution, job.State, job.Title, job.FileName, job.FileSize,
                 job.DownloadedBytes, job.TotalBytes, job.Error, job.CreatedAt, expiresIn);
         }
     }
 
     /// <summary>
-    /// Pulls the job image before every job, so each download runs the newest
-    /// yt-dlp. If the registry is down or rate-limits, the local copy will do.
+    /// Pulls the job image before every job and probe, at most once per
+    /// PullInterval, so each download runs the newest yt-dlp. If the registry
+    /// is down or rate-limits, the local copy will do.
     /// </summary>
     private async Task UpdateImageAsync(CancellationToken cancellationToken)
     {
@@ -337,9 +407,15 @@ public sealed class JobManager(
         try
         {
             var previous = await docker.GetImageIdAsync(settings.JobImage, cancellationToken);
+            if (previous is not null && DateTimeOffset.UtcNow - lastPull < PullInterval)
+            {
+                return;
+            }
+
             try
             {
                 await docker.PullImageAsync(settings.JobImage, cancellationToken);
+                lastPull = DateTimeOffset.UtcNow;
             }
             catch (Exception exception) when (previous is not null && exception is not OperationCanceledException)
             {

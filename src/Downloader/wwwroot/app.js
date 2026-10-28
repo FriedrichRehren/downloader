@@ -2,7 +2,13 @@
 
 const form = document.getElementById("form");
 const input = document.getElementById("url");
+const probeButton = document.getElementById("probe");
 const message = document.getElementById("message");
+const media = document.getElementById("media");
+const thumbnail = document.getElementById("thumbnail");
+const resolutionSelect = document.getElementById("video-resolution");
+const videoFormat = document.getElementById("video-format");
+const audioFormat = document.getElementById("audio-format");
 const list = document.getElementById("jobs");
 const empty = document.getElementById("empty");
 const template = document.getElementById("job");
@@ -13,33 +19,147 @@ const rows = new Map();
 let jobs = [];
 let fetchedAt = Date.now();
 let pollTimer;
+// The URL that was read last, and what it offers.
+let probed = null;
 
 const number = new Intl.NumberFormat("de-DE", { maximumFractionDigits: 1 });
+const formatNames = { mp4: "MP4", mkv: "MKV", mp3: "MP3", m4a: "M4A", flac: "FLAC", wav: "WAV" };
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const mode = event.submitter?.value ?? "video";
-  const format = event.submitter?.dataset.format ?? "original";
-  setBusy(true);
+  const url = input.value.trim();
+  probeButton.disabled = true;
+  probeButton.textContent = "Liest ein …";
+  showMessage("");
+  media.hidden = true;
   try {
-    const response = await fetch("api/jobs", {
+    const response = await fetch("api/probe", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: input.value, mode, format }),
+      body: JSON.stringify({ url }),
     });
     if (!response.ok) {
       throw new Error(await problem(response));
     }
-    input.value = "";
-    showMessage("");
-    await refresh();
+    const probe = await response.json();
+    // Someone typed over the URL while it was being read.
+    if (input.value.trim() === url) {
+      probed = { url, probe };
+      showMedia(probe);
+    }
   } catch (error) {
     showMessage(error.message);
   } finally {
-    setBusy(false);
-    input.focus();
+    probeButton.disabled = false;
+    probeButton.textContent = "Einlesen";
   }
 });
+
+// The formats on show belong to the URL that was read, not to a new one.
+input.addEventListener("input", () => {
+  if (probed && input.value.trim() !== probed.url) {
+    media.hidden = true;
+  }
+});
+
+videoFormat.addEventListener("change", () => fillResolutions(probed.probe));
+
+for (const button of media.querySelectorAll("button[data-mode]")) {
+  button.addEventListener("click", async () => {
+    const mode = button.dataset.mode;
+    const request = mode === "video"
+      ? { url: probed.url, mode, format: videoFormat.value, resolution: Number(resolutionSelect.value) || null }
+      : { url: probed.url, mode, format: audioFormat.value };
+    button.disabled = true;
+    try {
+      const response = await fetch("api/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+      });
+      if (!response.ok) {
+        throw new Error(await problem(response));
+      }
+      showMessage("");
+      await refresh();
+    } catch (error) {
+      showMessage(error.message);
+    } finally {
+      button.disabled = false;
+    }
+  });
+}
+
+function showMedia(probe) {
+  setText(document.getElementById("media-title"), probe.title ?? probed.url);
+  const duration = probe.duration ? countdown(Math.round(probe.duration)) : null;
+  setText(document.getElementById("media-meta"), [probe.uploader, duration].filter(Boolean).join(" · "));
+  thumbnail.hidden = !probe.thumbnail;
+  thumbnail.src = probe.thumbnail ?? "";
+
+  document.getElementById("video").hidden = probe.resolutions.length === 0 && probe.best.tier == null;
+  document.getElementById("audio").hidden = probe.best.audioCodec == null && probe.audioCodecs.length === 0;
+  videoFormat.value = "original";
+  resolutionSelect.value = "";
+  fillResolutions(probe);
+  fillAudio(probe);
+  media.hidden = false;
+}
+
+// The first entry is always "best": no limit, which is what yt-dlp would
+// pick on its own. Below it come the lower tiers, each sent as the highest
+// resolution within it.
+function fillResolutions(probe) {
+  const previous = resolutionSelect.value;
+  // MP4 means H.264, so only its streams count, and those are never HDR. A
+  // source without any H.264 is remuxed as it is.
+  const h264 = probe.resolutions
+    .filter((offer) => offer.h264)
+    .map((offer) => ({ ...offer, fps: offer.h264Fps, hdr: false }));
+  const mp4 = videoFormat.value === "mp4" && h264.length > 0;
+  const best = mp4 ? h264[0] : probe.best;
+  const lower = (mp4 ? h264 : probe.resolutions).filter((offer) => offer.tier < (best.tier ?? Infinity));
+
+  resolutionSelect.replaceChildren(
+    option("", [
+      "Beste Qualität",
+      describe(best),
+      mp4 ? "H.264" : best.videoCodec,
+      videoFormat.value === "mp4" || !best.size ? null : `ca. ${size(best.size)}`,
+    ]),
+    ...lower.map((offer) => option(offer.resolution, [describe(offer)])),
+  );
+  resolutionSelect.value = [...resolutionSelect.options].some((entry) => entry.value === previous) ? previous : "";
+}
+
+function fillAudio(probe) {
+  const kept = (codec) => (probe.audioCodecs.includes(codec) ? "ohne Umwandlung" : "umgewandelt");
+  const best = probe.best;
+  audioFormat.replaceChildren(
+    option("original", [
+      "Beste Qualität",
+      best.audioCodec,
+      best.audioBitrate ? `${Math.round(best.audioBitrate)} kbit/s` : null,
+    ]),
+    option("mp3", ["MP3", kept("MP3")]),
+    option("m4a", ["M4A (AAC)", kept("AAC")]),
+    option("flac", ["FLAC", kept("FLAC")]),
+    option("wav", ["WAV", "umgewandelt, unkomprimiert"]),
+  );
+}
+
+function describe(offer) {
+  if (offer.tier == null) {
+    return null;
+  }
+  const fps = offer.fps > 30 ? Math.round(offer.fps) : "";
+  const name = offer.tier >= 4320 ? " · 8K" : offer.tier >= 2160 ? " · 4K" : "";
+  return `${offer.tier}p${fps}${name}${offer.hdr ? " · HDR" : ""}`;
+}
+
+function option(value, parts) {
+  return new Option(parts.filter(Boolean).join(" · "), value);
+}
 
 async function refresh() {
   clearTimeout(pollTimer);
@@ -126,10 +246,8 @@ function updateRow(row, job, elapsed) {
 }
 
 function kind(job) {
-  if (job.format && job.format !== "original") {
-    return job.format.toUpperCase();
-  }
-  return job.mode === "audio" ? "Audio" : "Video";
+  const name = formatNames[job.format] ?? (job.mode === "audio" ? "Audio" : "Video");
+  return job.resolution ? `${name} ${job.resolution}p` : name;
 }
 
 function status(job, percent, expiresIn) {
@@ -171,12 +289,6 @@ function countdown(seconds) {
 function setText(element, text) {
   if (element.textContent !== text) {
     element.textContent = text;
-  }
-}
-
-function setBusy(busy) {
-  for (const button of form.querySelectorAll("button")) {
-    button.disabled = busy;
   }
 }
 

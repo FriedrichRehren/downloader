@@ -29,6 +29,12 @@ public sealed class DownloaderOptions
     // Queued plus running. Anything beyond is refused rather than queued.
     public int MaxActiveJobs { get; set; } = 10;
 
+    // Reading a URL's formats takes seconds; anything slower has hung.
+    public TimeSpan ProbeTimeout { get; set; } = TimeSpan.FromMinutes(1);
+
+    // Probes run beside the jobs. Beyond this many at once they are refused.
+    public int MaxConcurrentProbes { get; set; } = 3;
+
     public string DataPath { get; set; } = "/downloads";
 
     // Docker volume mounted at DataPath. Empty means: read it off this

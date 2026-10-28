@@ -14,15 +14,36 @@
 
     <form id="form" autocomplete="off">
       <input id="url" name="url" type="url" inputmode="url" placeholder="URL einfügen" required autofocus>
-      <div class="modes">
-        <button type="submit" value="video" title="Beste Qualität, so wie die Quelle sie liefert">Video</button>
-        <button type="submit" value="video" data-format="mp4" class="secondary" title="H.264 in MP4, läuft in jedem Player; bei YouTube höchstens 1080p">MP4</button>
-        <button type="submit" value="audio" title="Originalspur in bester Qualität">Audio</button>
-        <button type="submit" value="audio" data-format="mp3" class="secondary" title="In MP3 umgewandelt, läuft in jedem Player">MP3</button>
-      </div>
+      <button type="submit" id="probe">Einlesen</button>
     </form>
-    <p class="formats">Video und Audio in bester Qualität, MP4 und MP3 für jeden Player.</p>
     <p id="message" class="message" role="alert" hidden></p>
+
+    <section id="media" class="media" hidden>
+      <div class="source">
+        <img id="thumbnail" alt="" referrerpolicy="no-referrer" hidden>
+        <div class="about">
+          <p id="media-title" class="media-title"></p>
+          <p id="media-meta" class="meta"></p>
+        </div>
+      </div>
+
+      <div id="video" class="pick">
+        <select id="video-resolution" aria-label="Auflösung"></select>
+        <select id="video-format" aria-label="Videoformat">
+          <option value="original" selected>Originalformat</option>
+          <option value="mp4">MP4 · läuft überall</option>
+          <option value="mkv">MKV</option>
+        </select>
+        <button type="button" data-mode="video">Video laden</button>
+      </div>
+
+      <div id="audio" class="pick">
+        <select id="audio-format" aria-label="Audioformat"></select>
+        <button type="button" data-mode="audio">Audio laden</button>
+      </div>
+
+      <p class="formats">Voreingestellt ist jeweils die beste Qualität. Umgewandelte Formate klingen nie besser als das Original.</p>
+    </section>
 
     <ul id="jobs" class="jobs"></ul>
     <p id="empty" class="hint">
