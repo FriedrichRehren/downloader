@@ -38,7 +38,7 @@ public sealed class JobManager(
             .OrderByDescending(job => job.CreatedAt)
             .ToList();
 
-    public JobView? Enqueue(string url, JobMode mode, string owner)
+    public JobView? Enqueue(string url, JobMode mode, JobFormat format, string owner)
     {
         if (entries.Values.Count(entry => entry.Job.State is JobState.Queued or JobState.Running) >= settings.MaxActiveJobs)
         {
@@ -51,6 +51,7 @@ public sealed class JobManager(
             Owner = owner,
             Url = url,
             Mode = mode,
+            Format = format,
             CreatedAt = DateTimeOffset.UtcNow,
             State = JobState.Queued,
         };
@@ -235,7 +236,7 @@ public sealed class JobManager(
         return await docker.CreateContainerAsync($"downloader-job-{job.Id}", new
         {
             Image = settings.JobImage,
-            Cmd = YtDlp.BuildArguments(job.Url, job.Mode),
+            Cmd = YtDlp.BuildArguments(job.Url, job.Mode, job.Format),
             User = settings.JobUser,
             // deno and Python want a writable home for their caches.
             Env = new[] { "HOME=/tmp" },
@@ -321,7 +322,7 @@ public sealed class JobManager(
             var expiresIn = job.ExpiresAt is { } expiresAt
                 ? (long)Math.Max(0, (expiresAt - DateTimeOffset.UtcNow).TotalSeconds)
                 : (long?)null;
-            return new JobView(job.Id, job.Url, job.Mode, job.State, job.Title, job.FileName, job.FileSize,
+            return new JobView(job.Id, job.Url, job.Mode, job.Format, job.State, job.Title, job.FileName, job.FileSize,
                 job.DownloadedBytes, job.TotalBytes, job.Error, job.CreatedAt, expiresIn);
         }
     }

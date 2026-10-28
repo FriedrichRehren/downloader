@@ -15,10 +15,13 @@
     <form id="form" autocomplete="off">
       <input id="url" name="url" type="url" inputmode="url" placeholder="URL einfügen" required autofocus>
       <div class="modes">
-        <button type="submit" value="video">Video</button>
-        <button type="submit" value="audio" class="secondary">Audio</button>
+        <button type="submit" value="video" title="Beste Qualität, so wie die Quelle sie liefert">Video</button>
+        <button type="submit" value="video" data-format="mp4" class="secondary" title="H.264 in MP4, läuft in jedem Player; bei YouTube höchstens 1080p">MP4</button>
+        <button type="submit" value="audio" title="Originalspur in bester Qualität">Audio</button>
+        <button type="submit" value="audio" data-format="mp3" class="secondary" title="In MP3 umgewandelt, läuft in jedem Player">MP3</button>
       </div>
     </form>
+    <p class="formats">Video und Audio in bester Qualität, MP4 und MP3 für jeden Player.</p>
     <p id="message" class="message" role="alert" hidden></p>
 
     <ul id="jobs" class="jobs"></ul>

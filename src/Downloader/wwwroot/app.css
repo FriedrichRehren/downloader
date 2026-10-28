@@ -73,9 +73,16 @@ input:focus {
 }
 
 .modes {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
   gap: 8px;
-  flex: 1 1 auto;
+  flex: 1 1 100%;
+}
+
+.formats {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
 }
 
 button,
@@ -214,6 +221,10 @@ button:disabled {
 @media (max-width: 480px) {
   main {
     padding-top: 24px;
+  }
+
+  .modes {
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .job .line:last-child {

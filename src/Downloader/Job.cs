@@ -6,6 +6,16 @@ public enum JobMode
     Audio,
 }
 
+public enum JobFormat
+{
+    // The best the source offers, kept as it is.
+    Original,
+    // Video in MP4 with H.264 and AAC, which every player takes.
+    Mp4,
+    // Audio converted to MP3.
+    Mp3,
+}
+
 public enum JobState
 {
     Queued,
@@ -21,6 +31,8 @@ public sealed class Job
     public required string Owner { get; init; }
     public required string Url { get; init; }
     public required JobMode Mode { get; init; }
+    // Not required: jobs saved before formats existed are Original.
+    public JobFormat Format { get; init; }
     public required DateTimeOffset CreatedAt { get; init; }
     public JobState State { get; set; }
     public string? Title { get; set; }
@@ -36,6 +48,7 @@ public sealed record JobView(
     string Id,
     string Url,
     JobMode Mode,
+    JobFormat Format,
     JobState State,
     string? Title,
     string? FileName,

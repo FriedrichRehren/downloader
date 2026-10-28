@@ -19,12 +19,13 @@ const number = new Intl.NumberFormat("de-DE", { maximumFractionDigits: 1 });
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const mode = event.submitter?.value ?? "video";
+  const format = event.submitter?.dataset.format ?? "original";
   setBusy(true);
   try {
     const response = await fetch("api/jobs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: input.value, mode }),
+      body: JSON.stringify({ url: input.value, mode, format }),
     });
     if (!response.ok) {
       throw new Error(await problem(response));
@@ -111,7 +112,7 @@ function updateRow(row, job, elapsed) {
   const percent = job.totalBytes ? Math.min(100, (job.downloadedBytes ?? 0) / job.totalBytes * 100) : null;
 
   row.element.dataset.state = job.state;
-  setText(row.mode, job.mode === "audio" ? "Audio" : "Video");
+  setText(row.mode, kind(job));
   setText(row.title, job.title ?? job.fileName ?? job.url);
   row.title.title = job.url;
 
@@ -124,11 +125,22 @@ function updateRow(row, job, elapsed) {
   setText(row.remove, active ? "Abbrechen" : "Entfernen");
 }
 
+function kind(job) {
+  if (job.format && job.format !== "original") {
+    return job.format.toUpperCase();
+  }
+  return job.mode === "audio" ? "Audio" : "Video";
+}
+
 function status(job, percent, expiresIn) {
   switch (job.state) {
     case "queued":
       return "Wartet auf einen freien Platz …";
     case "running":
+      // Downloaded, now merging or converting; ffmpeg reports no progress.
+      if (percent >= 100) {
+        return "Wird verarbeitet …";
+      }
       if (percent !== null) {
         return `${number.format(percent)} % · ${size(job.downloadedBytes)} von ${size(job.totalBytes)}`;
       }

@@ -38,7 +38,12 @@ jobs.MapPost("", (CreateJobRequest request, HttpContext context, JobManager mana
         return Results.Problem("Unbekannter Modus.", statusCode: StatusCodes.Status400BadRequest);
     }
 
-    return manager.Enqueue(url.AbsoluteUri, request.Mode, Client.Identify(context)) is { } job
+    if (!YtDlp.Supports(request.Mode, request.Format))
+    {
+        return Results.Problem("Dieses Format gibt es für diesen Modus nicht.", statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    return manager.Enqueue(url.AbsoluteUri, request.Mode, request.Format, Client.Identify(context)) is { } job
         ? Results.Created($"/api/jobs/{job.Id}", job)
         : Results.Problem("Es laufen schon zu viele Downloads.", statusCode: StatusCodes.Status429TooManyRequests);
 });
@@ -53,4 +58,4 @@ jobs.MapGet("{id}/file", (string id, HttpContext context, JobManager manager) =>
 
 app.Run();
 
-internal sealed record CreateJobRequest(string? Url, JobMode Mode);
+internal sealed record CreateJobRequest(string? Url, JobMode Mode, JobFormat Format = JobFormat.Original);

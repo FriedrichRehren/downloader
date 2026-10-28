@@ -7,7 +7,7 @@ public class YtDlpTests
     [Fact]
     public void Url_comes_last_behind_the_end_of_options_marker()
     {
-        var arguments = YtDlp.BuildArguments("--exec=rm -rf /", JobMode.Video);
+        var arguments = YtDlp.BuildArguments("--exec=rm -rf /", JobMode.Video, JobFormat.Original);
 
         Assert.Equal("--", arguments[^2]);
         Assert.Equal("--exec=rm -rf /", arguments[^1]);
@@ -16,7 +16,7 @@ public class YtDlpTests
     [Fact]
     public void Video_merges_best_video_and_audio()
     {
-        var arguments = YtDlp.BuildArguments("https://example.com/v", JobMode.Video);
+        var arguments = YtDlp.BuildArguments("https://example.com/v", JobMode.Video, JobFormat.Original);
 
         Assert.Equal("bv*+ba/b", After(arguments, "--format"));
         Assert.DoesNotContain("--extract-audio", arguments);
@@ -25,11 +25,42 @@ public class YtDlpTests
     [Fact]
     public void Audio_extracts_without_re_encoding()
     {
-        var arguments = YtDlp.BuildArguments("https://example.com/v", JobMode.Audio);
+        var arguments = YtDlp.BuildArguments("https://example.com/v", JobMode.Audio, JobFormat.Original);
 
         Assert.Equal("ba/b", After(arguments, "--format"));
         Assert.Contains("--extract-audio", arguments);
         Assert.Equal("best", After(arguments, "--audio-format"));
+    }
+
+    [Fact]
+    public void Mp4_prefers_h264_and_aac_in_an_mp4_container()
+    {
+        var arguments = YtDlp.BuildArguments("https://example.com/v", JobMode.Video, JobFormat.Mp4);
+
+        Assert.StartsWith("vcodec:h264,", After(arguments, "--format-sort"));
+        Assert.EndsWith(",acodec:aac", After(arguments, "--format-sort"));
+        Assert.Equal("mp4", After(arguments, "--merge-output-format"));
+        Assert.Equal("mp4", After(arguments, "--remux-video"));
+    }
+
+    [Fact]
+    public void Mp3_converts_at_the_best_quality()
+    {
+        var arguments = YtDlp.BuildArguments("https://example.com/v", JobMode.Audio, JobFormat.Mp3);
+
+        Assert.Contains("--extract-audio", arguments);
+        Assert.Equal("mp3", After(arguments, "--audio-format"));
+        Assert.Equal("0", After(arguments, "--audio-quality"));
+    }
+
+    [Theory]
+    [InlineData(JobMode.Video, JobFormat.Mp3)]
+    [InlineData(JobMode.Audio, JobFormat.Mp4)]
+    [InlineData(JobMode.Audio, (JobFormat)42)]
+    public void Formats_belong_to_one_mode(JobMode mode, JobFormat format)
+    {
+        Assert.False(YtDlp.Supports(mode, format));
+        Assert.Throws<ArgumentOutOfRangeException>(() => YtDlp.BuildArguments("https://example.com/v", mode, format));
     }
 
     [Fact]

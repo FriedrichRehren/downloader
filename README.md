@@ -36,14 +36,21 @@ das Label `io.rehren.downloader.job` ab.
 
 ### Formate
 
-| Modus | yt-dlp | Ergebnis |
-|---|---|---|
-| Video | `-f bv*+ba/b --merge-output-format mp4/webm/mkv` | beste Video- und Audiospur, ohne Neukodierung zusammengeführt; bei YouTube meist AV1/Opus als `.webm` |
-| Audio | `-f ba/b -x --audio-format best` | Originalspur ohne Neukodierung, meist `.opus` oder `.m4a`; bietet die Quelle verlustfreies Audio an, bleibt es verlustfrei, etwa als `.flac` |
+| Button | API (`mode`, `format`) | yt-dlp | Ergebnis |
+|---|---|---|---|
+| Video | `video`, `original` | `-f bv*+ba/b --merge-output-format mp4/webm/mkv` | beste Video- und Audiospur, ohne Neukodierung zusammengeführt; bei YouTube meist AV1/Opus als `.webm` |
+| MP4 | `video`, `mp4` | wie `-t mp4`: `-S vcodec:h264,…,acodec:aac --merge-output-format mp4 --remux-video mp4` | H.264 und AAC als `.mp4`, ohne Neukodierung; läuft in jedem Player, bei YouTube aber höchstens 1080p |
+| Audio | `audio`, `original` | `-f ba/b -x --audio-format best` | Originalspur ohne Neukodierung, meist `.opus` oder `.m4a`; bietet die Quelle verlustfreies Audio an, bleibt es verlustfrei, etwa als `.flac` |
+| MP3 | `audio`, `mp3` | wie `-t mp3`, aber `--audio-quality 0` | in MP3 umgewandelt, beste VBR-Stufe (LAME V0, bei Musik um 245 kbit/s) |
 
-Beides ist die höchste Qualität, die die Quelle hergibt. Eine Umwandlung nach
-FLAC oder WAV gibt es bewusst nicht: aus einer verlustbehafteten Spur wird
+Video und Audio sind die höchste Qualität, die die Quelle hergibt. MP4 und MP3
+tauschen etwas davon gegen Kompatibilität; MP3 ist die einzige Variante, die
+neu kodiert. Die yt-dlp-Presets sind ausgeschrieben statt per `-t` gesetzt,
+weil yt-dlp sich vorbehält, sie in neuen Versionen anzupassen. Eine Umwandlung
+nach FLAC oder WAV gibt es bewusst nicht: aus einer verlustbehafteten Spur wird
 dadurch nur eine größere Datei mit demselben Klang.
+
+`format` ist optional und steht ohne Angabe auf `original`.
 
 Playlists werden nicht aufgelöst: `--no-playlist` und `--playlist-items 1`
 sorgen dafür, dass höchstens ein Video geladen wird.

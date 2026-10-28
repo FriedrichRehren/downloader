@@ -13,7 +13,12 @@ public static class YtDlp
 {
     private const string Marker = "downloader:";
 
-    public static IReadOnlyList<string> BuildArguments(string url, JobMode mode)
+    public static bool Supports(JobMode mode, JobFormat format) =>
+        (mode, format) is (JobMode.Video or JobMode.Audio, JobFormat.Original)
+            or (JobMode.Video, JobFormat.Mp4)
+            or (JobMode.Audio, JobFormat.Mp3);
+
+    public static IReadOnlyList<string> BuildArguments(string url, JobMode mode, JobFormat format)
     {
         var arguments = new List<string>
         {
@@ -39,15 +44,34 @@ public static class YtDlp
             "--print", $"after_move:{Marker}file %(filepath)s",
         };
 
-        arguments.AddRange(mode switch
+        arguments.AddRange((mode, format) switch
         {
             // Best video and best audio, merged into the first container that
             // takes both codecs as they are, so nothing is re-encoded. For
             // YouTube's AV1 and Opus that is webm, which browsers play directly.
-            JobMode.Video => ["--format", "bv*+ba/b", "--merge-output-format", "mp4/webm/mkv"],
+            (JobMode.Video, JobFormat.Original) => ["--format", "bv*+ba/b", "--merge-output-format", "mp4/webm/mkv"],
+            // yt-dlp's -t mp4, spelled out so a new release cannot change it.
+            // H.264 and AAC sort first, still without re-encoding; on YouTube
+            // that means 1080p at most.
+            (JobMode.Video, JobFormat.Mp4) =>
+            [
+                "--format", "bv*+ba/b",
+                "--format-sort", "vcodec:h264,lang,quality,res,fps,hdr:12,acodec:aac",
+                "--merge-output-format", "mp4",
+                "--remux-video", "mp4",
+            ],
             // The original audio stream, again without re-encoding.
-            JobMode.Audio => ["--format", "ba/b", "--extract-audio", "--audio-format", "best"],
-            _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null),
+            (JobMode.Audio, JobFormat.Original) => ["--format", "ba/b", "--extract-audio", "--audio-format", "best"],
+            // yt-dlp's -t mp3, but at the best VBR quality instead of its
+            // default of 5. An MP3 source is kept as it is.
+            (JobMode.Audio, JobFormat.Mp3) =>
+            [
+                "--format", "ba[acodec^=mp3]/ba/b",
+                "--extract-audio",
+                "--audio-format", "mp3",
+                "--audio-quality", "0",
+            ],
+            _ => throw new ArgumentOutOfRangeException(nameof(format), format, $"{format} is not available for {mode}."),
         });
 
         // Everything after -- is a URL, even if it starts with a dash.
