@@ -1,0 +1,13 @@
+# .NET
+**/bin/
+**/obj/
+**/TestResults/
+*.user
+*.suo
+
+# IDE und Betriebssystem
+.idea/
+.vscode/
+.vs/
+.DS_Store
+Thumbs.db

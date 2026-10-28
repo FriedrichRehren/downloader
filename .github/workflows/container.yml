@@ -1,0 +1,127 @@
+name: Build and publish container
+
+# Every push to main is a release: it publishes `latest` and `sha-<commit>`,
+# then has Dockhand redeploy the stack. A rollback pins the stack in dockops
+# to one of the sha- tags.
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "**.md"
+  workflow_dispatch:
+
+concurrency:
+  group: container-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test application
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore and test
+        run: |
+          dotnet restore Downloader.slnx
+          dotnet test Downloader.slnx --configuration Release --no-restore
+
+  publish:
+    name: Publish multi-platform image
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/downloader
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short,prefix=sha-
+          labels: |
+            org.opencontainers.image.title=Downloader
+            org.opencontainers.image.description=Web front end that runs yt-dlp in a throwaway container per download
+
+      - name: Build and push image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+
+      - name: Deploy via webhook
+        env:
+          WEBHOOK_URL: ${{ secrets.DEPLOY_WEBHOOK_URL }}
+          WEBHOOK_SECRET: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}
+        run: |
+          if [ -z "$WEBHOOK_URL" ]; then
+            echo "DEPLOY_WEBHOOK_URL is not set — image published, no deploy triggered." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ -z "$WEBHOOK_SECRET" ]; then
+            echo "DEPLOY_WEBHOOK_URL is set but DEPLOY_WEBHOOK_SECRET is not." >&2
+            exit 1
+          fi
+          # The secret travels in a header, not in the query string the endpoint
+          # also accepts: Traefik logs full request URLs, so a token in the URL
+          # would end up in the access log on the server.
+          # --fail-with-body keeps the response on a 4xx/5xx, so a rejected
+          # token says so instead of failing blank. The call is synchronous:
+          # Dockhand pulls the image and restarts before it answers.
+          response=$(curl --fail-with-body --silent --show-error --max-time 300             --request POST "$WEBHOOK_URL"             --header "X-Gitlab-Token: $WEBHOOK_SECRET"             --header 'Content-Type: application/json'             --data '{}')
+          echo "Dockhand: $response" >> "$GITHUB_STEP_SUMMARY"
+          # Dockhand answers 200 with skipped=true when nothing changed in the
+          # stack's own directory in the deployment repository. Publishing an
+          # image changes no file there, so without force redeploy this would
+          # report success and deploy nothing.
+          if printf '%s' "$response" | jq -e '.skipped == true' > /dev/null 2>&1; then
+            echo "Webhook returned skipped — turn on force redeploy for the stack." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          # A deployment that fails comes back as 200 with success=false, which
+          # --fail-with-body does not catch.
+          if ! printf '%s' "$response" | jq -e '.success == true' > /dev/null 2>&1; then
+            echo "Webhook did not report success." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "Deploy triggered." >> "$GITHUB_STEP_SUMMARY"
